@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from src.schemas.trace import Trace
+from ragops.schemas.trace import Trace
 
 
 class TraceStorageError(RuntimeError):

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Generic, TypeVar
 
-from src.schemas.trace import Trace
-from src.tracing.collector import TraceCollector
+from ragops.schemas.trace import Trace
+from ragops.tracing.collector import TraceCollector
+
+
+logger = logging.getLogger(__name__)
 
 
 PipelineResult = TypeVar("PipelineResult")
@@ -25,10 +29,10 @@ class RagTracePayload:
 
 @dataclass(frozen=True, slots=True)
 class TracedRagResult(Generic[PipelineResult]):
-    """The untouched pipeline result plus its persisted trace ID."""
+    """The untouched pipeline result and its trace ID when persistence succeeds."""
 
     result: PipelineResult
-    trace_id: str
+    trace_id: str | None
 
 
 class TracedRagRunner(Generic[PipelineResult]):
@@ -45,6 +49,7 @@ class TracedRagRunner(Generic[PipelineResult]):
         result_mapper: Callable[[PipelineResult], RagTracePayload],
         prompt_version: str,
         model: str,
+        fail_open: bool = True,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
         if not prompt_version.strip():
@@ -56,6 +61,7 @@ class TracedRagRunner(Generic[PipelineResult]):
         self._result_mapper = result_mapper
         self._prompt_version = prompt_version.strip()
         self._model = model.strip()
+        self._fail_open = fail_open
         self._clock = clock
 
     def run(
@@ -69,17 +75,26 @@ class TracedRagRunner(Generic[PipelineResult]):
         started_at = self._clock()
         result = pipeline(query)
         latency_ms = (self._clock() - started_at) * 1000
+        try:
+            payload = self._result_mapper(result)
+            trace = Trace(
+                query=query,
+                retrieval_chunks=list(payload.retrieval_chunks),
+                retrieval_scores=list(payload.retrieval_scores),
+                prompt_version=self._prompt_version,
+                model=self._model,
+                answer=payload.answer,
+                latency_ms=latency_ms,
+                feedback=feedback,
+            )
+            persisted = self._collector.save(trace)
+        except Exception:
+            if not self._fail_open:
+                raise
+            logger.exception(
+                "Failed to create or persist RAG trace; returning pipeline result "
+                "without trace_id"
+            )
+            return TracedRagResult(result=result, trace_id=None)
 
-        payload = self._result_mapper(result)
-        trace = Trace(
-            query=query,
-            retrieval_chunks=list(payload.retrieval_chunks),
-            retrieval_scores=list(payload.retrieval_scores),
-            prompt_version=self._prompt_version,
-            model=self._model,
-            answer=payload.answer,
-            latency_ms=latency_ms,
-            feedback=feedback,
-        )
-        persisted = self._collector.save(trace)
         return TracedRagResult(result=result, trace_id=persisted.trace_id)

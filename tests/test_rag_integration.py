@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 import pytest
 
-from src.tracing import RagTracePayload, TraceCollector, TracedRagRunner
+from ragops.tracing import RagTracePayload, TraceCollector, TraceStorageError, TracedRagRunner
 
 
 def clock_from(values: list[float]) -> Iterator[float]:
@@ -52,6 +53,7 @@ def test_rag_request_returns_queryable_trace_id(tmp_path) -> None:
 
     assert received_queries == ["退款审核通过后多久到账？"]
     assert run.result is raw_result
+    assert run.trace_id is not None
     assert run.trace_id.startswith("trc_")
 
     stored_trace = collector.get_trace(run.trace_id)
@@ -69,19 +71,152 @@ def test_rag_request_returns_queryable_trace_id(tmp_path) -> None:
     assert stored_trace.feedback == "有帮助"
 
 
-def test_failed_rag_request_does_not_persist_incomplete_trace(tmp_path) -> None:
+def test_fail_open_returns_original_result_when_trace_save_fails(
+    tmp_path, monkeypatch, caplog
+) -> None:
     collector = TraceCollector(tmp_path / "traces.jsonl")
+    raw_result = {"answer": "pipeline succeeded"}
+    pipeline_calls = 0
+
+    def pipeline(query: str) -> dict[str, str]:
+        nonlocal pipeline_calls
+        pipeline_calls += 1
+        return raw_result
+
+    def fail_save(trace) -> None:
+        raise TraceStorageError("storage unavailable")
+
+    monkeypatch.setattr(collector, "save", fail_save)
+    runner = TracedRagRunner[dict[str, str]](
+        collector,
+        result_mapper=lambda result: RagTracePayload([], [], result["answer"]),
+        prompt_version="support_qa_v1",
+        model="deepseek-chat",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        run = runner.run("question", pipeline)
+
+    assert run.result is raw_result
+    assert run.trace_id is None
+    assert pipeline_calls == 1
+    assert any(
+        "Failed to create or persist RAG trace" in record.getMessage()
+        and record.name == "ragops.tracing.rag_integration"
+        and record.exc_info is not None
+        for record in caplog.records
+    )
+
+
+def test_fail_open_handles_result_mapper_failure(tmp_path, caplog) -> None:
+    collector = TraceCollector(tmp_path / "traces.jsonl")
+    raw_result = object()
+    pipeline_calls = 0
+
+    def pipeline(query: str) -> object:
+        nonlocal pipeline_calls
+        pipeline_calls += 1
+        return raw_result
+
+    def failing_mapper(result: object) -> RagTracePayload:
+        raise ValueError("mapping failed")
+
+    runner = TracedRagRunner[object](
+        collector,
+        result_mapper=failing_mapper,
+        prompt_version="support_qa_v1",
+        model="deepseek-chat",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        run = runner.run("question", pipeline)
+
+    assert run.result is raw_result
+    assert run.trace_id is None
+    assert pipeline_calls == 1
+    assert collector.list_traces() == []
+    assert any(record.exc_info is not None for record in caplog.records)
+
+
+def test_fail_open_handles_trace_validation_failure(tmp_path, caplog) -> None:
+    collector = TraceCollector(tmp_path / "traces.jsonl")
+    raw_result = object()
+    pipeline_calls = 0
+
+    def pipeline(query: str) -> object:
+        nonlocal pipeline_calls
+        pipeline_calls += 1
+        return raw_result
+
+    runner = TracedRagRunner[object](
+        collector,
+        result_mapper=lambda result: RagTracePayload(["chunk"], [], "answer"),
+        prompt_version="support_qa_v1",
+        model="deepseek-chat",
+    )
+
+    with caplog.at_level(logging.ERROR):
+        run = runner.run("question", pipeline)
+
+    assert run.result is raw_result
+    assert run.trace_id is None
+    assert pipeline_calls == 1
+    assert collector.list_traces() == []
+    assert any(record.exc_info is not None for record in caplog.records)
+
+
+def test_fail_closed_raises_trace_error_without_repeating_pipeline(
+    tmp_path, monkeypatch
+) -> None:
+    collector = TraceCollector(tmp_path / "traces.jsonl")
+    pipeline_calls = 0
+
+    def pipeline(query: str) -> str:
+        nonlocal pipeline_calls
+        pipeline_calls += 1
+        return "answer"
+
+    def fail_save(trace) -> None:
+        raise TraceStorageError("storage unavailable")
+
+    monkeypatch.setattr(collector, "save", fail_save)
+    runner = TracedRagRunner[str](
+        collector,
+        result_mapper=lambda result: RagTracePayload([], [], result),
+        prompt_version="support_qa_v1",
+        model="deepseek-chat",
+        fail_open=False,
+    )
+
+    with pytest.raises(TraceStorageError, match="storage unavailable"):
+        runner.run("question", pipeline)
+
+    assert pipeline_calls == 1
+
+
+@pytest.mark.parametrize("fail_open", [True, False])
+def test_failed_rag_request_does_not_persist_incomplete_trace(
+    tmp_path, caplog, fail_open: bool
+) -> None:
+    collector = TraceCollector(tmp_path / "traces.jsonl")
+    pipeline_calls = 0
     runner = TracedRagRunner[object](
         collector,
         result_mapper=lambda result: RagTracePayload([], [], str(result)),
         prompt_version="support_qa_v1",
         model="deepseek-chat",
+        fail_open=fail_open,
     )
 
     def failing_pipeline(query: str) -> object:
+        nonlocal pipeline_calls
+        pipeline_calls += 1
         raise RuntimeError(f"pipeline failed for: {query}")
 
-    with pytest.raises(RuntimeError, match="pipeline failed"):
-        runner.run("会失败的问题", failing_pipeline)
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RuntimeError, match="pipeline failed"):
+            runner.run("会失败的问题", failing_pipeline)
 
+    assert pipeline_calls == 1
     assert collector.list_traces() == []
+    assert caplog.records == []

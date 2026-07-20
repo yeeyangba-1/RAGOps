@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from src.schemas.trace import Trace
-from src.tracing.collector import DuplicateTraceError, TraceCollector, TraceStorageError
+from ragops.schemas.trace import Trace
+from ragops.tracing.collector import DuplicateTraceError, TraceCollector, TraceStorageError
 
 
 def make_trace(**overrides: object) -> Trace:
