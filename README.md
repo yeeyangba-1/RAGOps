@@ -5,7 +5,8 @@ RAGOps 是面向知识库场景的 RAG 应用质量评测与持续优化 SDK。�
 `TracedRagRunner` 接入层。
 
 项目目标是基于 StudyRAG 和 SearchInsight 两个原型，逐步形成工程化、可复用的
-RAG 质量基础设施；当前版本不包含 Evaluation、Agent、API 或数据库。
+RAG 质量基础设施。当前版本包含本地、确定性的规则 Evaluation MVP，但不包含
+Agent、API 或数据库。
 
 ## 安装
 
@@ -49,12 +50,35 @@ runner = TracedRagRunner(
     TraceCollector(Path("outputs") / "ragops_traces.jsonl"),
     result_mapper=map_result,
     prompt_version="qa_v1",
-    model="deepseek-chat",
+    model="example-model",
 )
 
 run = runner.run("用户问题", rag_pipeline)
 print(run.result)
 print(run.trace_id)
+```
+
+## Evaluation MVP
+
+`RuleBasedEvaluator` 可以直接评估已有 Trace，不调用网络或大模型：
+
+```python
+from ragops.evaluation import RuleBasedEvaluator
+from ragops.schemas import Trace
+
+trace = Trace(
+    query="示例问题",
+    retrieval_chunks=["示例检索片段"],
+    retrieval_scores=[0.91],
+    prompt_version="qa_v1",
+    model="example-model",
+    answer="示例回答",
+    latency_ms=842,
+)
+
+result = RuleBasedEvaluator().evaluate(trace)
+print(result.passed)
+print(result.issues)
 ```
 
 ## Trace 保存失败策略
