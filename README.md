@@ -103,6 +103,35 @@ print(report.pass_rate)
 print(report.issue_counts)
 ```
 
+## 离线评估
+
+本地 Trace JSONL 可以通过规则评估器生成并保存一个 EvaluationReport：
+
+```python
+from pathlib import Path
+
+from ragops.evaluation import (
+    EvaluationReportCollector,
+    OfflineEvaluationRunner,
+    RuleBasedEvaluator,
+)
+from ragops.tracing import TraceCollector
+
+runner = OfflineEvaluationRunner(
+    TraceCollector(Path("outputs") / "ragops_traces.jsonl"),
+    RuleBasedEvaluator(),
+    EvaluationReportCollector(Path("outputs") / "evaluation_reports.jsonl"),
+)
+
+report = runner.run()
+print(report.report_id)
+print(report.total_count)
+print(report.pass_rate)
+print(report.failed_trace_ids)
+```
+
+当前离线评估是面向本地单进程使用的 JSONL MVP。
+
 ## Trace 保存失败策略
 
 `fail_open=True` 是默认行为。Pipeline 成功后，如果结果映射、Trace 校验或持久化
