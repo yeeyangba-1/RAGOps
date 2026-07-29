@@ -39,7 +39,9 @@ def test_save_creates_parent_and_decision_can_be_reloaded(tmp_path) -> None:
 
     assert collector.save(decision) == decision
     assert storage_path.exists()
-    assert ReleaseDecisionCollector(storage_path).list_decisions() == [decision]
+    reloaded = ReleaseDecisionCollector(storage_path).list_decisions()
+    assert reloaded == [decision]
+    assert reloaded[0].comparison == decision.comparison
 
 
 def test_multiple_decisions_keep_append_order(tmp_path) -> None:
@@ -98,6 +100,16 @@ def test_schema_invalid_json_reports_physical_line_number(tmp_path) -> None:
     )
 
     with pytest.raises(ReleaseDecisionStorageError, match="line 2"):
+        ReleaseDecisionCollector(storage_path).list_decisions()
+
+
+def test_tampered_decision_statistics_are_rejected_on_reload(tmp_path) -> None:
+    storage_path = tmp_path / "decisions.jsonl"
+    payload = json.loads(make_decision().model_dump_json())
+    payload["candidate_pass_rate"] = 0.9
+    storage_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ReleaseDecisionStorageError, match="line 1"):
         ReleaseDecisionCollector(storage_path).list_decisions()
 
 

@@ -56,6 +56,7 @@ def test_default_policy_approves_when_all_conditions_pass() -> None:
 
     assert decision.approved is True
     assert decision.reasons == ()
+    assert decision.comparison == comparison
 
 
 def test_policy_threshold_boundaries_are_inclusive() -> None:

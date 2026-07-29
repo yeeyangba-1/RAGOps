@@ -24,6 +24,7 @@ def test_runner_decides_persists_and_returns_decision(tmp_path) -> None:
 
     assert collector.list_decisions() == [decision]
     assert decision.comparison_id == comparison.comparison_id
+    assert decision.comparison == comparison
 
 
 def test_runner_uses_custom_policy(tmp_path) -> None:

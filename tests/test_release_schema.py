@@ -99,7 +99,17 @@ def test_decision_identity_source_ids_and_utc_timestamp() -> None:
     assert decision.comparison_id == comparison.comparison_id
     assert decision.baseline_report_id == comparison.baseline_report.report_id
     assert decision.candidate_report_id == comparison.candidate_report.report_id
+    assert decision.comparison == comparison
     assert decision.created_at.tzinfo == timezone.utc
+
+
+def test_decision_json_round_trip_preserves_source_comparison() -> None:
+    decision = ReleaseDecision.from_comparison(make_comparison(), ReleasePolicy())
+
+    reloaded = ReleaseDecision.model_validate_json(decision.model_dump_json())
+
+    assert reloaded == decision
+    assert reloaded.comparison == decision.comparison
 
 
 def test_empty_comparison_is_rejected_for_only_empty_reason() -> None:
@@ -121,10 +131,11 @@ def test_empty_comparison_is_rejected_for_only_empty_reason() -> None:
     [
         ("approved", False),
         ("reasons", (ReleaseDecisionReason.TOO_MANY_REGRESSIONS,)),
-        ("candidate_pass_rate", 0.0),
-        ("pass_rate_delta", None),
-        ("regressed_trace_count", 1),
-        ("total_issue_increase", 1),
+        ("comparison_id", "comparison_other_valid_id"),
+        ("baseline_report_id", "report_other_baseline"),
+        ("candidate_report_id", "report_other_candidate"),
+        ("candidate_pass_rate", 0.9),
+        ("pass_rate_delta", 0.1),
     ],
 )
 def test_decision_rejects_inconsistent_external_statistics(
@@ -139,14 +150,40 @@ def test_decision_rejects_inconsistent_external_statistics(
         ReleaseDecision.model_validate(data)
 
 
-def test_empty_decision_rejects_nonzero_derived_counts() -> None:
-    empty = make_report([])
-    comparison = ExperimentComparison.from_reports(empty, empty)
-    decision = ReleaseDecision.from_comparison(comparison, ReleasePolicy())
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("regressed_trace_count", 1),
+        ("total_issue_increase", 1),
+    ],
+)
+def test_decision_rejects_wrong_counts_even_within_loose_policy(
+    field_name: str,
+    invalid_value: int,
+) -> None:
+    decision = ReleaseDecision.from_comparison(
+        make_comparison(),
+        ReleasePolicy(
+            max_regressed_trace_count=5,
+            max_total_issue_increase=5,
+        ),
+    )
     data = decision.model_dump(mode="python")
-    data["regressed_trace_count"] = 1
+    data[field_name] = invalid_value
 
-    with pytest.raises(ValidationError, match="zero derived counts"):
+    with pytest.raises(ValidationError, match="source comparison"):
+        ReleaseDecision.model_validate(data)
+
+
+def test_nested_comparison_rejects_tampered_derived_statistics() -> None:
+    decision = ReleaseDecision.from_comparison(make_comparison(), ReleasePolicy())
+    data = decision.model_dump(mode="python")
+    data["comparison"]["candidate_pass_rate"] = 0.9
+
+    with pytest.raises(
+        ValidationError,
+        match="candidate_pass_rate must match the actual report comparison",
+    ):
         ReleaseDecision.model_validate(data)
 
 

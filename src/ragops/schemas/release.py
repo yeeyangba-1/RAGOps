@@ -100,6 +100,7 @@ class ReleaseDecision(BaseModel):
     comparison_id: str = Field(min_length=12, pattern=r"^comparison_")
     baseline_report_id: str = Field(min_length=8, pattern=r"^report_")
     candidate_report_id: str = Field(min_length=8, pattern=r"^report_")
+    comparison: ExperimentComparison
     policy: ReleasePolicy
     approved: bool
     reasons: tuple[ReleaseDecisionReason, ...] = Field(default_factory=tuple)
@@ -141,25 +142,37 @@ class ReleaseDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision(self) -> "ReleaseDecision":
-        is_empty = (
-            self.candidate_pass_rate is None and self.pass_rate_delta is None
+        expected_candidate_pass_rate = self.comparison.candidate_pass_rate
+        expected_pass_rate_delta = self.comparison.pass_rate_delta
+        expected_regressed_trace_count = len(
+            self.comparison.regressed_trace_ids
         )
-        if (self.candidate_pass_rate is None) != (self.pass_rate_delta is None):
-            raise ValueError(
-                "candidate_pass_rate and pass_rate_delta must both be present "
-                "or both be None"
-            )
-        if is_empty and (
-            self.regressed_trace_count != 0 or self.total_issue_increase != 0
-        ):
-            raise ValueError("empty evaluations must have zero derived counts")
+        expected_total_issue_increase = sum(
+            max(delta, 0)
+            for delta in self.comparison.issue_count_deltas.values()
+        )
+
+        expected_fields = {
+            "comparison_id": self.comparison.comparison_id,
+            "baseline_report_id": self.comparison.baseline_report.report_id,
+            "candidate_report_id": self.comparison.candidate_report.report_id,
+            "candidate_pass_rate": expected_candidate_pass_rate,
+            "pass_rate_delta": expected_pass_rate_delta,
+            "regressed_trace_count": expected_regressed_trace_count,
+            "total_issue_increase": expected_total_issue_increase,
+        }
+        for field_name, expected_value in expected_fields.items():
+            if getattr(self, field_name) != expected_value:
+                raise ValueError(
+                    f"{field_name} must match the source comparison"
+                )
 
         expected_reasons = _derive_reasons(
             self.policy,
-            self.candidate_pass_rate,
-            self.pass_rate_delta,
-            self.regressed_trace_count,
-            self.total_issue_increase,
+            expected_candidate_pass_rate,
+            expected_pass_rate_delta,
+            expected_regressed_trace_count,
+            expected_total_issue_increase,
         )
         if self.reasons != expected_reasons:
             raise ValueError("reasons must match the derived release checks")
@@ -188,6 +201,7 @@ class ReleaseDecision(BaseModel):
             comparison_id=comparison.comparison_id,
             baseline_report_id=comparison.baseline_report.report_id,
             candidate_report_id=comparison.candidate_report.report_id,
+            comparison=comparison,
             policy=policy,
             approved=not reasons,
             reasons=reasons,
