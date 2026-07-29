@@ -132,6 +132,34 @@ print(report.failed_trace_ids)
 
 当前离线评估是面向本地单进程使用的 JSONL MVP。
 
+## 坏案例分析
+
+`IssueAnalyzer` 将评估失败结果与原始 Trace 关联，并直接使用已有 issue 分组：
+
+```python
+from pathlib import Path
+
+from ragops.analysis import IssueAnalyzer
+from ragops.evaluation import EvaluationReportCollector
+from ragops.tracing import TraceCollector
+
+traces = TraceCollector(
+    Path("outputs") / "ragops_traces.jsonl"
+).list_traces()
+reports = EvaluationReportCollector(
+    Path("outputs") / "evaluation_reports.jsonl"
+).list_reports()
+
+analysis = IssueAnalyzer().analyze(reports[-1], traces)
+print(analysis.total_bad_cases)
+print(analysis.issue_groups)
+
+for bad_case in analysis.bad_cases:
+    print(bad_case.trace.query)
+    print(bad_case.trace.answer)
+    print(bad_case.evaluation.issues)
+```
+
 ## Trace 保存失败策略
 
 `fail_open=True` 是默认行为。Pipeline 成功后，如果结果映射、Trace 校验或持久化
