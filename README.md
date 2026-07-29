@@ -187,6 +187,57 @@ print(comparison.issue_count_deltas)
 
 当前只比较已有 `EvaluationReport`。负的 issue delta 表示候选报告中的该问题数量减少。
 
+## 发布门禁
+
+`ReleaseGateRunner` 根据已有实验对比生成并保存确定性的发布建议：
+
+```python
+from pathlib import Path
+
+from ragops.evaluation import EvaluationReportCollector
+from ragops.experiments import ExperimentComparator
+from ragops.release import (
+    ReleaseDecisionCollector,
+    ReleaseGate,
+    ReleaseGateRunner,
+)
+from ragops.schemas import ReleasePolicy
+
+reports = EvaluationReportCollector(
+    Path("outputs") / "evaluation_reports.jsonl"
+).list_reports()
+baseline_report, candidate_report = reports[-2:]
+comparison = ExperimentComparator().compare(
+    baseline_report,
+    candidate_report,
+)
+
+runner = ReleaseGateRunner(
+    ReleaseGate(),
+    ReleaseDecisionCollector(
+        Path("outputs") / "release_decisions.jsonl"
+    ),
+)
+decision = runner.run(
+    comparison,
+    ReleasePolicy(
+        min_candidate_pass_rate=0.8,
+        min_pass_rate_delta=0.0,
+        max_regressed_trace_count=0,
+        max_total_issue_increase=0,
+    ),
+)
+
+print(decision.approved)
+print(decision.reasons)
+print(decision.candidate_pass_rate)
+print(decision.pass_rate_delta)
+print(decision.regressed_trace_count)
+print(decision.total_issue_increase)
+```
+
+当前门禁是本地单进程 JSONL MVP，只生成发布建议，不会自动部署或发布。
+
 ## Trace 保存失败策略
 
 `fail_open=True` 是默认行为。Pipeline 成功后，如果结果映射、Trace 校验或持久化
