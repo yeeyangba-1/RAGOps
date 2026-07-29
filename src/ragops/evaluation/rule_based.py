@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from numbers import Real
 
-from ragops.schemas.evaluation import EvaluationIssueCode, EvaluationResult
+from ragops.schemas.evaluation import (
+    EvaluationIssueCode,
+    EvaluationReport,
+    EvaluationResult,
+)
 from ragops.schemas.trace import Trace
 
 
@@ -69,3 +74,7 @@ class RuleBasedEvaluator:
             min_retrieval_score=self.min_retrieval_score,
             max_latency_ms=self.max_latency_ms,
         )
+
+    def evaluate_many(self, traces: Iterable[Trace]) -> EvaluationReport:
+        """Evaluate traces in input order and summarize their results."""
+        return EvaluationReport.from_results(self.evaluate(trace) for trace in traces)

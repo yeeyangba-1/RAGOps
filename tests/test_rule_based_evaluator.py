@@ -133,3 +133,111 @@ def test_evaluation_does_not_modify_trace() -> None:
     assert trace.model_dump(mode="json") == before
     assert result.trace_id == trace.trace_id
     assert result.latency_ms == trace.latency_ms
+
+
+def test_empty_batch_returns_valid_empty_report() -> None:
+    report = RuleBasedEvaluator().evaluate_many([])
+
+    assert report.results == ()
+    assert report.total_count == 0
+    assert report.passed_count == 0
+    assert report.failed_count == 0
+    assert report.pass_rate is None
+    assert report.issue_counts == {
+        EvaluationIssueCode.NO_RETRIEVAL: 0,
+        EvaluationIssueCode.LOW_RETRIEVAL_SCORE: 0,
+        EvaluationIssueCode.HIGH_LATENCY: 0,
+    }
+    assert report.failed_trace_ids == ()
+
+
+def test_batch_with_all_passing_traces() -> None:
+    traces = [make_trace(trace_id="trc_pass_1"), make_trace(trace_id="trc_pass_2")]
+
+    report = RuleBasedEvaluator().evaluate_many(traces)
+
+    assert report.total_count == 2
+    assert report.passed_count == 2
+    assert report.failed_count == 0
+    assert report.pass_rate == 1.0
+
+
+def test_batch_with_all_failing_traces() -> None:
+    traces = [
+        make_trace(trace_id="trc_fail_1", retrieval_chunks=[], retrieval_scores=[]),
+        make_trace(trace_id="trc_fail_2", retrieval_scores=[0.1]),
+    ]
+
+    report = RuleBasedEvaluator().evaluate_many(traces)
+
+    assert report.passed_count == 0
+    assert report.failed_count == 2
+    assert report.pass_rate == 0.0
+    assert report.failed_trace_ids == ("trc_fail_1", "trc_fail_2")
+
+
+def test_mixed_batch_preserves_results_and_failed_trace_order() -> None:
+    traces = (
+        make_trace(trace_id="trc_pass_1"),
+        make_trace(trace_id="trc_fail_1", latency_ms=40000.0),
+        make_trace(trace_id="trc_pass_2"),
+        make_trace(trace_id="trc_fail_2", retrieval_scores=[0.1]),
+    )
+
+    report = RuleBasedEvaluator().evaluate_many(traces)
+
+    assert tuple(result.trace_id for result in report.results) == tuple(
+        trace.trace_id for trace in traces
+    )
+    assert report.passed_count == 2
+    assert report.failed_count == 2
+    assert report.pass_rate == 0.5
+    assert report.failed_trace_ids == ("trc_fail_1", "trc_fail_2")
+
+
+def test_batch_counts_all_issue_codes_and_multi_issue_result_once() -> None:
+    traces = [
+        make_trace(trace_id="trc_none", retrieval_chunks=[], retrieval_scores=[]),
+        make_trace(
+            trace_id="trc_low_slow",
+            retrieval_scores=[0.1],
+            latency_ms=40000.0,
+        ),
+    ]
+
+    report = RuleBasedEvaluator().evaluate_many(traces)
+
+    assert report.issue_counts == {
+        EvaluationIssueCode.NO_RETRIEVAL: 1,
+        EvaluationIssueCode.LOW_RETRIEVAL_SCORE: 1,
+        EvaluationIssueCode.HIGH_LATENCY: 1,
+    }
+    assert report.results[1].issues == (
+        EvaluationIssueCode.LOW_RETRIEVAL_SCORE,
+        EvaluationIssueCode.HIGH_LATENCY,
+    )
+
+
+def test_batch_supports_generator_input() -> None:
+    traces = (make_trace(trace_id=f"trc_{index}") for index in range(3))
+
+    report = RuleBasedEvaluator().evaluate_many(traces)
+
+    assert report.total_count == 3
+    assert tuple(result.trace_id for result in report.results) == (
+        "trc_0",
+        "trc_1",
+        "trc_2",
+    )
+
+
+def test_batch_evaluation_does_not_modify_traces() -> None:
+    traces = [
+        make_trace(trace_id="trc_original_1"),
+        make_trace(trace_id="trc_original_2", retrieval_scores=[0.1]),
+    ]
+    before = [trace.model_dump(mode="json") for trace in traces]
+
+    RuleBasedEvaluator().evaluate_many(traces)
+
+    assert [trace.model_dump(mode="json") for trace in traces] == before
