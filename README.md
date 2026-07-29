@@ -160,6 +160,33 @@ for bad_case in analysis.bad_cases:
     print(bad_case.evaluation.issues)
 ```
 
+## 实验结果对比
+
+`ExperimentComparator` 比较两份已经生成、且覆盖相同 Trace 集合的评估报告：
+
+```python
+from pathlib import Path
+
+from ragops.evaluation import EvaluationReportCollector
+from ragops.experiments import ExperimentComparator
+
+reports = EvaluationReportCollector(
+    Path("outputs") / "evaluation_reports.jsonl"
+).list_reports()
+baseline_report, candidate_report = reports[-2:]
+
+comparison = ExperimentComparator().compare(
+    baseline_report,
+    candidate_report,
+)
+print(comparison.pass_rate_delta)
+print(comparison.improved_trace_ids)
+print(comparison.regressed_trace_ids)
+print(comparison.issue_count_deltas)
+```
+
+当前只比较已有 `EvaluationReport`。负的 issue delta 表示候选报告中的该问题数量减少。
+
 ## Trace 保存失败策略
 
 `fail_open=True` 是默认行为。Pipeline 成功后，如果结果映射、Trace 校验或持久化
