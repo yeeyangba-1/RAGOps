@@ -81,6 +81,28 @@ print(result.passed)
 print(result.issues)
 ```
 
+批量评估会保持输入顺序，并汇总通过率和各类问题次数：
+
+```python
+traces = [
+    trace,
+    Trace(
+        query="另一个示例问题",
+        retrieval_chunks=[],
+        retrieval_scores=[],
+        prompt_version="qa_v1",
+        model="example-model",
+        answer="没有找到相关内容。",
+        latency_ms=615,
+    ),
+]
+
+report = RuleBasedEvaluator().evaluate_many(traces)
+print(report.total_count)
+print(report.pass_rate)
+print(report.issue_counts)
+```
+
 ## Trace 保存失败策略
 
 `fail_open=True` 是默认行为。Pipeline 成功后，如果结果映射、Trace 校验或持久化

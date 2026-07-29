@@ -1,6 +1,6 @@
 """Pydantic schemas used by RAGOps."""
 
-from .evaluation import EvaluationIssueCode, EvaluationResult
+from .evaluation import EvaluationIssueCode, EvaluationReport, EvaluationResult
 from .trace import Trace
 
-__all__ = ["EvaluationIssueCode", "EvaluationResult", "Trace"]
+__all__ = ["EvaluationIssueCode", "EvaluationReport", "EvaluationResult", "Trace"]
