@@ -2,5 +2,13 @@
 
 from .evaluation import EvaluationIssueCode, EvaluationReport, EvaluationResult
 from .trace import Trace
+from .analysis import BadCase, IssueAnalysisReport
 
-__all__ = ["EvaluationIssueCode", "EvaluationReport", "EvaluationResult", "Trace"]
+__all__ = [
+    "BadCase",
+    "EvaluationIssueCode",
+    "EvaluationReport",
+    "EvaluationResult",
+    "IssueAnalysisReport",
+    "Trace",
+]
